@@ -1,0 +1,600 @@
+---
+title: "Probability And Statistical Inference Math 9102(TU059)"
+author: "Mina Jamshidian"
+Student Number: D20124995
+R version: 4.0.2 
+---
+
+
+Section 1 - Research Question(s)
+
+Research Question
+
+This analysis is about predicting whether a client with different  individual and social characteristics will subscribe to term deposit or not based on last contact duration?
+
+This analysis would help us to find which factors could be considered to be perfect for prediction of determining a subscription situation.  
+Furthermore this is a project that concerns whether clients' education, their age,  last contact duration with two contact types can be influenced on subscription of term deposit by clients.
+
+Hypothesis
+
+Hypothesis 1:
+H0: There will be no significant predictor for last call duration that leads clients to subscribed term deposits by different age groups? 
+H1: There will be a significant predictor for last call duration that leads clients to subscribed term deposits by different age groups? 
+
+Hypothesis 2:
+H0: There will be no significant predictor for last call duration that leads clients to subscribed term deposits by different age and different education? 
+H1: There will be a significant predictor for last call duration that leads clients to subscribed term deposits by different age and different education? 
+
+
+
+Section 2 - Dataset
+
+
+# Loading Library
+```{r, warning=FALSE}
+library(lmSupport)
+library(stargazer)
+library(dplyr)
+library(rcompanion)
+library(pastecs)
+library(lavaan)
+library(pander)
+library(psych)
+library(ggplot2)
+library(varhandle)
+library(effsize)
+library(Hmisc)
+library(stringr)
+library(lmtest)
+library(sampler)
+library(gmodels)
+library(readr)
+library(ROSE)
+library(tidyr)
+library(gplots)
+library(lsr)
+library(stargazer)
+library(car)
+
+
+```
+
+
+# Importing Data
+```{r, warning=FALSE}
+# Cleaning Work space
+rm(list = ls()) 
+setwd("~/Desktop/TU Dublin/SEM 1/Prob. and Statistical Inference/Assignment/CA2/CA2-SI-3")
+
+# importing the  bank marketing data csv file
+bank = read.csv("bank-additional-full.csv",sep = ";")
+
+```
+
+# Treating Dataset and variables
+```{r, warning=FALSE}
+#searching for unknowns throughout the datset
+colSums(bank == "unknown")
+
+#converting the target variable to 0,1
+bank= bank%>% mutate(age_label= if_else(age > 60,"senior-citizen",if_else(age>45,"mid-old",if_else(age>30,"Mid-age",if_else(age>15,"Young","Children")))))
+
+#cleaning the unknown values for 4 variables based on their correlation with the target variable
+CrossTable(bank$job,bank$y)
+CrossTable(bank$marital,bank$y)
+CrossTable(bank$education,bank$y)
+CrossTable(bank$housing,bank$y)
+
+bank = bank %>% filter( job!= "unknown")
+bank = bank %>% filter( marital!= "unknown")
+bank$education[bank$education=="unknown"]="university.degree"
+bank = bank %>% filter( housing!= "unknown")
+#removing column default & duration
+bank = bank[-c(5)]
+#Checking the unknown values again
+colSums(bank == "unknown")
+
+#Filter the dataset by campaign of less than 10
+bank= bank%>%filter(campaign<10)
+
+
+```
+
+Variables of interest:
+The variables of interest used in this research are shown below:
+
+```{r, warning=FALSE}
+# Create table
+
+panderOptions('table.split.table',Inf)
+data_variables<-"
+Concept                           |  Variable Name | Statistical Type  | Possible Values
+last contact duration, in seconds |  duration      |   Numerical       | Range 0 to 4918
+client age                        |  age_label     | Categorical       | 1.age>60(senior-citizen) 2.age>45(mid-old) 3.age>30(Mid-age) 4. age>15(Young) 5.age<15(Children)
+client subscribed a term deposit? |   y            | Categorical       | yes and no
+contact communication type        |  contact       | Categorical       | cellular, telephone
+client education                  |  education     | Categorical       | basic.4y to university.degree
+
+
+
+"
+df<-read.delim(textConnection(data_variables),header = FALSE,sep = '|',strip.white = TRUE,stringsAsFactors = FALSE)
+names(df)<-unname(as.list(df[1,]))
+df<-df[-1,]
+row.names(df)<-NULL
+pander(df,style='rmarkdown')
+
+```
+
+
+```{r, warning=FALSE}
+
+# Source: Sampling Design & Analysis, S. Lohr, 2000, equation 2.17
+size <- rsampcalc(nrow(bank), e=5, ci=95,p=0.5, over=0.1)
+sbank2<-ssamp(bank, size, y,over=0.1)
+sbank2 %>% count(y)
+
+```
+
+
+## Statistical measurement 
+
+Each of the variables of interest would be inspected. The numeric variables of interest, that representing the last contact duration with customer, in seconds. it would be inspected for normality by checking standardised scores for skewness and kurtosis and considering the percentage of standardised scores for the variables fell outside of expected boundaries and creating histograms and QQ plots. Decisions on skewness and kurtosis came from the advice of (George & Mallory, 2011) that categorizes a distribution as normal if the relevant standardised scores for skewness and kurtosis fall in the range +/- 2 and the advice of (Field, Miles & Field, 2012) which categorizes a distribution as normal if 95% of the standardised scores for the variable fall within the bounds of +/-3.29 for a dataset larger than 80 cases. Summary statistics of various nominal variables were also identified for analysis.
+
+# Duration
+Inspecting the Duration variable and its Normality by code:
+```{r, warning=FALSE}
+# Descriptive statistics
+# getting summary statistics for duration variable
+duration<- sbank2$duration
+duration_d<-describe(duration,omit = TRUE, IQR = TRUE)
+duration_s<-list(pastecs::stat.desc(duration, basic = FALSE))
+
+skew         <- semTools::skew(duration)
+kurt         <- semTools::kurtosis(duration)
+stdskew      <- skew[1] / skew[2]
+stdkurt      <- kurt[1] / kurt[2]
+zscore       <- abs(scale(duration))
+gt196        <- FSA::perc(as.numeric(zscore), 1.96, "gt")
+gt329        <- FSA::perc(as.numeric(zscore), 3.29, "gt")
+
+duration_s$skew <- skew
+duration_s$kurt <- kurt
+duration_s$std.skew <- stdskew
+duration_s$std.kurt <- stdkurt
+duration_s$gt.196 <- gt196
+duration_s$gt.329 <- gt329
+duration_s
+
+# Distribution of Age variable with visualization 
+ggplot(sbank2,aes(x=duration))+labs(x='duration', y='Density')+
+  geom_histogram(binwidth = 30,colour='black',aes(y=..density..,fill=..count..))+
+  scale_fill_gradient("Count",low="#132B43", high="#56B1F7")+
+  stat_function(fun = dnorm,color="red",args = list(mean=mean(duration,na.rm = TRUE),sd=sd(duration,na.rm = TRUE)))+
+  ggtitle('Distribution of Duration')+
+  theme(plot.title = element_text(size=10))
+
+# Create QQ Plot
+qqnorm(duration, main = "QQplot of Duration")
+qqline(duration,col=2) # show line on the plot
+
+
+```
+
+# Report of Normality Analysis
+
+The Duration is represented by a numeric variable in the dataset. Inspection of the standardised scores for skewness and kurtosis reveal that the kurtosis score (*kurtosis* = 44.5, *SE* = .227) and the skewness score (*skewness* = 24.95, *SE* = .113) is out of that range which is the range of range of -2 and 2 . This implies that kurtosis and skewness is not normal. For further inspection using plots such as histogram and normality plot (figure 8 and figure 8), we found that the distribution is  positively skewed and not normalized. there are various values deviating from the normality line. On inspection of the count of outliers, there was found 2.1% standardised scores were outside the acceptable range of [-3.29, +3.29] that shows none of the values is outside the 95% Confidence Interval. In total, based on all the tests, it can be said that the data for duration variable will not be treated as a normal within this analysis. (*Median*=`r median(sbank2$duration,na.rm = TRUE)`, *IQR*=`r IQR(sbank2$duration,na.rm = TRUE)`,*M* = `r mean(sbank2$duration, na.rm=TRUE)`, *SD* = `r sd(sbank2$duration, na.rm=TRUE)`,  *N* = `r length(sbank2$duration)-sum(is.na(sbank2$duration))`).
+
+
+# Transforming duration
+
+After inspecting the duration variable,it was found that it was treated as non normal. In this analysis, the Log transformation was performed to this non normal data to convert it into the normal data before doing the linear parametric tests. This transformation approach was chosen because the Parametric test transformed normal data is considered more powerful compared to non parametric test on untransformed non normal data. So, the transformed duration variable would be used for result analysis and manipulation. 
+
+Transforming the duration variable and Checking Normality by code:
+```{r, warning=FALSE}
+#Using the Log function for transforming duration
+tduration<- log(sbank2$duration+10)
+
+#adding the duration transformation to dataset table as new column by the name tduration 
+sbank2 <- sbank2 %>% mutate(tduration)
+
+tduration_d<-describe(tduration,omit = TRUE, IQR = TRUE)
+tduration_s<-list(pastecs::stat.desc(tduration, basic = FALSE))
+
+skew         <- semTools::skew(tduration)
+kurt         <- semTools::kurtosis(tduration)
+stdskew      <- skew[1] / skew[2]
+stdkurt      <- kurt[1] / kurt[2]
+zscore       <- abs(scale(tduration))
+gt196        <- FSA::perc(as.numeric(zscore), 1.96, "gt")
+gt329        <- FSA::perc(as.numeric(zscore), 3.29, "gt")
+
+tduration_s$skew <- skew
+tduration_s$kurt <- kurt
+tduration_s$std.skew <- stdskew
+tduration_s$std.kurt <- stdkurt
+tduration_s$gt.196 <- gt196
+tduration_s$gt.329 <- gt329
+tduration_s
+
+# Distribution of transformed duration(tduration) variable with visualization After Transformation
+ggplot(sbank2,aes(x=tduration))+labs(x='Tranformed Duration', y='Density')+
+  geom_histogram(binwidth = 0.5,colour='black',aes(y=..density..,fill=..count..))+
+  scale_fill_gradient("Count",low="#132B43", high="#56B1F7")+
+  stat_function(fun = dnorm,color="red",args = list(mean=mean(tduration,na.rm = TRUE),sd=sd(tduration,na.rm = TRUE)))+
+  ggtitle('Distribution of Tranformed Duration')+
+  theme(plot.title = element_text(size=10))
+
+# Create QQ Plot
+qqnorm(tduration, main = "QQplot of Tranformed Duration")
+qqline(tduration,col=2) # show line on the plot
+
+```
+
+#### Report of Normality Analysis of Transformed Total HADS Anxiety data
+
+Transformed duration variable is represented by a numeric variable which was calculated by doing Log function on the duration variable in the dataset. Inspecting the standardized scores for skewness (*skewness* = 1.23, *SE* = .113) and kurtosis (*kurtosis* = 1.16, *SE* = .227) shows that both of the skewness and the kurtosis value fall within the standardized score range of -2 and 2 which was implied that both skewness and kurtosis are normal. For further inspecting by using plots such as histogram and normality plot (figure 12 and figure 13), it was found that the distribution is normal. On inspection of the count of outliers, we found the 0% standardised scores were outside the acceptable range of [-3.29, +3.29]. which shows that none of the values is in outside of the 95% Confidence Interval. In total, it was found base all the test that was done the data for transformed duration variable has a normal distribution by this analysis (*M* = `r mean(tduration, na.rm=TRUE)`, *SD* = `r sd(tduration, na.rm=TRUE)`, *N* = `r length(tduration)-sum(is.na(tduration))`).
+
+
+### Has the client subscribed to a term deposit?
+
+Has the client subscribed a term deposit(y) is a nominal variable in the bank marketing dataset. The sample dataset contains data from 53 clients who subscribed 'Yes' and 403 clients who did not subscribe 'No'. The variable is representative of a sample which the clients  will subscribe to the term deposit.
+
+#### Inspecting the variable by code:
+```{r, warning=FALSE}
+y<-table(sbank2$y)
+y
+
+# report basic summary statistics by a grouping variable
+describeBy(tduration,sbank2$y)
+
+#remove NA from if there is exist
+dy<-data.frame(sbank2$y,tduration)
+dy<-na.omit(dy)
+names(dy)<-c("y","duration")
+
+# Create box plot for the variable
+medhelp_graph<-ggplot(dy,aes(y,duration))
+medhelp_graph+stat_summary(fun.y = mean,geom = "bar",fill="#56B1F7",colour="black",na.rm = TRUE)+stat_summary(fun.data = mean_cl_normal,geom = "pointrange",na.rm = TRUE)+labs(x="Client subscribtion of term deposit",y="Last call duration",title="Mean call duration by Client subscribtion of term deposit")
+
+```
+
+### Age of client
+
+Age of client is a categorical variable in the bank marketing dataset. The sample dataset has data from 9 clients in the senior-citizen group(age>60), 265 clients in the Mid-age group(age >45), 117 clients in the mid-old group(age>30), 71 clients in the young group(age>15). The variable is representative of a sample which is a client from a Portuguese banking institution.
+
+#### Inspecting the variable by code:
+```{r, warning=FALSE}
+age_label<-table(sbank2$age_label)
+age_label
+
+# report basic summary statistics by a grouping variable
+describeBy(tduration,sbank2$age_label)
+
+#remove NA from if there is exist
+dage<-data.frame(sbank2$age_label,tduration)
+dage<-na.omit(dage)
+names(dage)<-c("age_label","duration")
+
+# Create box plot for the variable
+medhelp_graph<-ggplot(dage,aes(age_label,duration))
+medhelp_graph+stat_summary(fun.y = mean,geom = "bar",fill="#56B1F7",colour="black",na.rm = TRUE)+stat_summary(fun.data = mean_cl_normal,geom = "pointrange",na.rm = TRUE)+labs(x="Clients Age",y="Last call duration",title="Mean Last call duration by Clients age")
+
+```
+
+### Clients Education 
+
+Client Education is a categorical variable in the bank marketing dataset. The sample dataset has data from 42 clients in basic.4y group education, 30 clients in the basic.6y education group, 81 clients in the basic.9y education group, 110 clients in the high.school education group, 58  clients in the professional.course education group, 141 clients in the university.degree education group. The variable is representative of a sample which is a client from a Portuguese banking institution.
+
+#### Inspecting the variable by code:
+```{r, warning=FALSE}
+
+education<-table(sbank2$education)
+education
+sbank2$education[sbank2$education=="illiterate"]="basic.4y"
+
+# report basic summary statistics by a grouping variable
+describeBy(tduration,sbank2$education)
+
+#remove NA from if there is exist
+dedu<-data.frame(sbank2$education,tduration)
+dedu<-na.omit(dedu)
+names(dedu)<-c("education","duration")
+
+# Create box plot for the variable
+medhelp_graph<-ggplot(dedu,aes(education,duration))
+medhelp_graph+stat_summary(fun.y = mean,geom = "bar",fill="#56B1F7",colour="black",na.rm = TRUE)+stat_summary(fun.data = mean_cl_normal,geom = "pointrange",na.rm = TRUE)+labs(x="Clients Education",y="Last call duration",title="Mean Last call duration by Clients Education")
+
+```
+### Contact Type 
+
+Contact type is a categorical variable in the bank marketing dataset. The sample dataset has data from 297 clients by  cellular contact type, 165 clients by telephone contact type. The variable is representative of a sample which is a client from a Portuguese banking institution.
+
+#### Inspecting the variable by code:
+```{r, warning=FALSE}
+contact<-table(sbank2$contact)
+contact
+
+# report basic summary statistics by a grouping variable
+describeBy(tduration,sbank2$contact)
+
+#remove NA from if there is exist
+dcon<-data.frame(sbank2$contact,tduration)
+dcon<-na.omit(dcon)
+names(dcon)<-c("contact","duration")
+
+# Create box plot for the variable
+medhelp_graph<-ggplot(dcon,aes(contact,duration))
+medhelp_graph+stat_summary(fun.y = mean,geom = "bar",fill="#56B1F7",colour="black",na.rm = TRUE)+stat_summary(fun.data = mean_cl_normal,geom = "pointrange",na.rm = TRUE)+labs(x="Contact Type",y="Last call duration",title="Mean Last call duration by Contact Type")
+```
+
+
+Section 3 - Results 
+
+An alpha level of .05 was adopted for the Pearson Correlation Test and Cohen's rules on effect size (coefficient which is r) were adopted. For correlation, according to Cohen, the effect size is low if the r value varies around .1, medium if r varies around .3, and high if r varies more than .5 (Field, Miles & Field, 2012).A p-value lower than the level of significance of .05 indicates that the null hypothesis is clear evidence to reject it. The effect size is low if the value of eta-squared varies around .01, medium if eta-squared varies around .06, and high if eta-squared varies more than .14, as per Cohen, for difference (Field, Miles & Field, 2012).
+
+### 4.1 Hypothesis 1
+
+H0: There will be no significant predictor for last call duration that leads clients to subscribed term deposits by different age groups? 
+H1: There will be a significant predictor for last call duration that leads clients to subscribed term deposits by different age groups? 
+
+# Evaluate Variables
+#### Check the difference in the last call duration for clients by different age groups.
+
+```{r, warning=FALSE}
+# Descriptive statistics by clients age group
+durage<-na.omit(data.frame(sbank2$tduration,sbank2$age_label))
+names(durage)<-c('tduration','age_label')
+
+# Descriptive statistics by client age groups
+describeBy(durage$tduration,durage$age_label)
+mean_durage<-round(tapply(durage$tduration,durage$age_label,FUN =mean),digits = 2)
+mean_durage
+
+# The plot shows how mean values of last call duration changes with different client age groups and the number of people belonging to each group as well.
+plotmeans(durage$tduration~durage$age_label,digits = 2,
+          ccol = 'red',mean.labels = TRUE,xlab = 'Clients age group',ylab = 'Last call duration',
+          main='Plot of Last call duration Mean by Clients age group')
+#From the graph, we can understand that the mean value of last call duration differs for different groups.
+#Last call duration with 'young' group having the lowest mean and Group 'senior-citizen' having the highest mean. 
+
+
+#the boxplot analysis for further hypothesis testing was performed.
+# Create boxplot
+boxplot(durage$tduration~durage$age_label,
+        main='Plot of Last call duration Score by Clients age group (dot is mean)',
+        xlab = 'Clients age group',ylab = 'Last call duration',col=rainbow(6))
+points(mean_durage,col='black',pch=18)
+# As it was obvious in boxplots,  it was inferred that each client in different age groups has a different amount of variation in last call duration and there is a lot of overlap among values for different groups. But this information is not enough to provide evidence to simply affirm or reject null hypothesis as it does not give information whether the differences are statistically significant. To determine statistical significance, we need to assess the confidence intervals for the differences of means. We further investigate if the difference in mean values, considering there is a lot of overlap of last call duration for different clients groups, is because of variation within groups or variation among the groups. The ANOVA Test would be done. just because of variation within groups or variation among the groups. This is done using ANOVA Test.
+
+# Bartlett test of homogeneity of variances
+bartlett.test(durage$tduration,durage$age_label) 
+# As it was aboviused in Figure 23 the p-value = .71 > .05 so the null hypothesis of the test is accepted and should be said that the variance of different groups can be assumed to be equal.
+
+#Doing the assumption of homoscedasticity for Anova test for last call duration and clients in different age groups.
+aov_durage<-aov(durage$tduration~durage$age_label)
+summary(aov_durage)
+# Since the value of F-statistic=2.05 > 1 (significant) and p-value=0.105 > 0.05, this shows that the variation among the groups and the variation within groups is high, so the mean values for different groups are not significantly different. Therefore, we could not reject the null hypothesis of the test which means the values for different groups are equal. In total, it was concluded that for the confidence interval the null hypothesis can not be rejected that there is no significant difference in last call duration for clients in different age groups.
+
+etaSquared(aov_durage)
+```
+
+#### Report of Difference Analysis
+
+A Bartlett's test was done and the equality of variance for Last call duration for all clients in different age group was indicated *K-squared* = 1.35, *P* = 0.7. 
+A one-way between-groups analysis of variance was conducted to last call duration for clients in different age groups. clients were divided into four groups according to their age (Group 1 : senior-sitizen; Group 2 : Mid-age; Group 3 : mid-old; Group 4 : young). 
+There was no statistically significant difference level in last call duration mean  for different clients age (*F(3, 458)* = 2.05, *p* = .105). 
+The effect size, calculated using eta squared was .01. 
+The test results indicate there is evidence to support accepting the null hypothesis that there is no difference in last call duration for clients in different age groups.
+
+
+
+### Checking the difference in last duration call leads clients to subscribed a term deposit.
+
+```{r, warning=FALSE, fig.width=10, fig.align='center'}
+
+# Descriptive statistics 
+contact<-as.factor(sbank2$y)
+
+#Conduct Levene's test for homogeneity of variance in library car
+ltest<-car::leveneTest(tduration ~ y, data=sbank2)
+#Pr(F) is the probability
+ltest
+
+#Conduct the t-test from package stats
+#You can use the var.equal = TRUE option to specify equal variances and a pooled variance estimate
+stats::t.test(tduration~y,var.equal=TRUE,data=sbank2)
+#Effect Size
+
+effsize::cohen.d(tduration,y, alpha = 0.05, na.rm=TRUE)
+# effet size=-19.23 large difference
+```
+#### Report of Difference Analysis
+
+A Levene's test was conducted and indicated equality of variance for Last call duration for clients who subscribed the term deposit (*F-value* = 3.02, *P* = .08). A t-test analysis of variance was conducted to explore last call duration for clients who subscribed term deposit. Participants were divided into  groups according to which clients will subscribe to the term deposit(Group 1 : Yes, Group 2 : No). There was a statistically significant difference in last call duration mean scores for clients who subscribed to a term deposit.The p-value for two sample tests is very small which means it is significant and can reject the null hypothesis. The effect size, calculated using Cohen's d was -19.23 which implies there is a strong standardised mean difference for both groups. The test results indicate there is evidence to reject null alternative hypothesis which is no difference in Last call duration for clients who subscribed term deposit.
+
+
+#### Build the linear regression models
+### Baseline Model last call duration predicted that clients in different age groups  will subscribe to term deposit.
+
+```{r}
+#dummycode
+df1<-data.frame(sbank2)
+which(names(df1)=='age_label')
+which(names(df1)=='y')
+which(names(df1)=='education')
+df1<-df1[,c(1,21,5,)]
+df1$tduration<-tduration
+df1<-na.omit(df1)
+df1
+df1$age_label=recode(df1$age_label,"senior-citizen"="1","Mid-age"='2',"mid-old"='3',"Young"='4')
+df1$education=recode(df1$education,'basic.4y'='1','basic.6y'='2','basic.9y'='3','high.school'='4','professional.course'='5','university.degree'='6')
+df1$y=recode(df1$y,'yes'='1','no'='2')
+
+df1
+
+model1=lm(sbank2$tduration~sbank2$contact+sbank2$age_label+sbank2$job)
+anova(model1)
+summary(model1)
+
+stargazer(model1, type="text") #Tidy output of all the required stats
+plot(model1)
+#Check assumptions
+# List of   residuals
+resid(model1)
+#A density plot of the residuals
+plot(density(resid(model1)))
+# leverage plots
+leveragePlots(model1) 
+#Cooks distance
+cooks.distance(model1)
+#Plot Cooks distance
+plot(cooks.distance(model1), ylab="Cook's statistic")
+# none of the values is greater than 1 so no influential values
+
+# Collinearity
+vifmodel<-vif(model1)
+vifmodel
+# value < 2.5 not problem
+1/(vifmodel)
+# values > .4 not problem
+```
+#### Report of Linear Modelling Analysis
+
+A multiple linear regression analysis was conducted to determine whether last call duration and clients age lead the customer to subscribed the term deposit. A significant regression equation was found (*F(4,457)*= 17.7, *p*=1.612e-13), with an Multiple R-squared=.1341 .
+
+Examination of the histogram, normal P-P plot of standardised residuals and the scatterplot of the dependent variable, last call duration, and standardised residuals showed that no outliers existed and the residuals followed normal distribution. Also, examination of the standardised residuals showed that none of the values was outside the standard range (95% within limits of -3.29 to +3.29) as the minimum and maximum values are -2.3 and 2.06 respectively further affirming that there were no outliers. Also, none of the  Cook's distances were found to be more than 1, hence there are no influential values.
+
+Examination for multicollinearity showed that the tolerance and variance influence factor measures were within acceptable levels (tolerance >0.4, VIF <2.5 ) as outlined in Tarling (2008). The scatter plot of standardised residuals showed that the data met the assumptions of homogeneity of variance and linearity. The data also meets the assumption of non-zero variances of the predictors.
+
+Because all the assumptions for the model 1 have been proven true and 13.41% of the variance in last call duration is explained by the considered predictors. On checking the significance levels for each of the main terms (in this case the coefficients associated with the constant, y2), we found that there is evidence that each of these terms are adding something to the model (they are statistically significant as p<.05). Hence, these statistical values provide enough evidence to reject that null hypothesis which is no significant prediction of last call duration that lead clients to subscribed term deposits in different age groups.
+
+
+
+### Hypothesis 2
+
+H0: There will be no significant predictor for last call duration that leads clients to subscribed term deposits by different age and different education? 
+H1: There will be a significant predictor for last call duration that leads clients to subscribed term deposits by different age and different education? 
+
+#### Check difference in the last call duration for clients with different education
+
+```{r, warning=FALSE}
+# Descriptive statistics
+duredu<-na.omit(data.frame(tduration,sbank2$education))
+names(duredu)<-c('tduration','education')
+# Descriptive statistics by education
+describeBy(duredu$tduration,duredu$education)
+# check mean for each education group
+mean_duredu<-round(tapply(duredu$tduration,duredu$education,FUN =mean),digits = 2)
+mean_duredu
+# The plot shows how last call duration Score means changes with different education groups as well as the number of people belonging to each group 
+plotmeans(duredu$tduration~duredu$education,digits = 2,
+          ccol = 'red',mean.labels = TRUE,xlab = 'Clients education',ylab = 'Last call duration',main='Plot of Last call duration Mean by Clients educationh')
+# From the graph, it was founded that the mean value of last call duration differs for different education groups.
+#Last call duration with 'basic.9y' group having the lowest mean and Group 'basic.4y' having the highest mean. 
+
+#the boxplot analysis for further hypothesis testing was performed.
+# Create boxplot
+boxplot(duredu$tduration~duredu$education,
+        main='Plot of last call duration by Clients educationh (dot is mean)',xlab = ' Clients educationh',ylab = 'Last call duration',col=rainbow(11))
+points(mean_duredu,col='black',pch=18)
+# Based on boxplots, it was inferred that each client in different age groups has a different amount of variation in last call duration and there is a lot of overlap among values for different groups. But this information is not enough to provide evidence to simply affirm or reject null hypothesis as it does not give information whether the differences are statistically significant. To determine statistical significance, we need to assess the confidence intervals for the differences of means. We further investigate the difference in mean values, considering there is a lot of overlap of last call duration for different clients groups, just because of variation within groups or variation among the groups. The ANOVA Test would be done.
+
+#Doing the Bartlett test of homogeneity of variances for last call duration and clients with different education.
+bartlett.test(duredu$tduration,duredu_new$education)
+# p-value= .14 > .05, 
+#As it was aboviused the p-value = .14 > .05 so the null hypothesis of the test is accepted and should be said that the variance of different groups can be assumed to be equal.
+
+# Perform ANOVA Test
+aov_duredu<-aov(duredu$tduration~duredu$education)
+summary(aov_duredu)
+# Since the value of F-statistic=1.87 > 1 (significant) and p-value=0.097 > 0.05, this shows that the variation among the groups and the variation within groups is high, so the mean values for different groups are not significantly different. Therefore, we could not reject the null hypothesis of the test which means the values for different groups are equal. In total, it was concluded that for the confidence interval the null hypothesis can not be rejected that there is no significant difference in last call duration for clients with different education.
+
+etaSquared(aov_duredu)
+
+```
+
+#### Report of Difference Analysis
+
+A Bartlett's test was done and the equality of variance for Last call duration for all clients in different age group was indicated *K-squared* = 8.12, *P* = .14. 
+A one-way between-groups analysis of variance was conducted to last call duration for clients with different education. clients were divided into six groups according to their education (Group 1 : basic.4y, Group 2 : basic.6y, Group 3 : basic.9y, Group 4 : high school,Group 5 : professional.course,Group 6 :university.degree). 
+There was no statistically significant difference level in last call duration mean  for different clients education (*F(5, 456)* = 1.87, *p* = .09). 
+The effect size, calculated using eta squared was .02. 
+The test results indicate there is evidence to support accepting the null hypothesis that there is no difference in last call duration for clients with different education.
+
+#### Build the linear regression models
+### Model 2- Model last call duration predicted that clients by different age groups and different education will subscribe to term deposit.
+
+```{r}
+
+model2<-lm(df1$tduration~df1$y+df1$age_label+df1$education)
+anova(model2)
+summary(model2)
+stargazer(model2, type="text") #Tidy output of all the required stats
+stargazer(model1, model2, type="text") #Quick model comparison
+plot(model2)
+#Check assumptions
+# Create histogram 
+# List of   residuals
+resid(model2)
+#A density plot of the residuals
+plot(density(resid(model2))) 
+# leverage plots
+leveragePlots(model2) 
+# Cooks distance
+cooks.distance(model2)
+#Plot Cooks distance
+plot(cooks.distance(model2), ylab="Cook's statistic")
+# none of the values is greater than 1 so no influential values
+# Collinearity
+vifmodel<-vif(model2)
+vifmodel
+# value < 2.5 not problem
+1/(vifmodel)
+# values > .4 not problem
+```
+
+#### Report of Linear Modelling Analysis
+
+A multiple linear regression analysis was conducted to determine whether last call duration and clients age lead the customer to subscribed the term deposit. A significant regression equation was found (*F(9,452)*= 8.368, *p*= 1.4e-11), with an Multiple R-squared=.1428.
+
+Examination of the histogram, normal P-P plot of standardised residuals and the scatterplot of the dependent variable, last call duration, and standardised residuals showed that no outliers existed and the residuals followed normal distribution. Also, examination of the standardised residuals showed that none of the values was outside the standard range (95% within limits of -3.29 to +3.29) as the minimum and maximum values are -2.2 and 1.95 respectively further affirming that there were no outliers. Also, none of the  Cook's distances were found to be more than 1, hence there are no influential values.
+
+Examination for multicollinearity showed that the tolerance and variance influence factor measures were within acceptable levels (tolerance >0.4, VIF <2.5 ) as outlined in Tarling (2008). The scatter plot of standardised residuals showed that the data met the assumptions of homogeneity of variance and linearity. The data also meets the assumption of non-zero variances of the predictors.
+
+Because all the assumptions for the model 1 have been proven true and 14.28% of the variance in last call duration is explained by the considered predictors. On checking the significance levels for each of the main terms (in this case the coefficients associated with the constant, y2), we found that there is evidence that just y2  and constant are adding something to the model (this statistically significant as p<.05). Hence, these statistical values provide enough evidence to reject that null hypothesis which is no significant prediction of last call duration that lead clients to subscribed term deposits by different age and different education.
+
+
+## Models Comparison 
+
+# Compare Model 1 and Model 2
+```{r compare model1, model2}
+anova(model1,model2)
+```
+
+### Model Comparison Results
+
+It was obvious that the p-value obtained for second model (*p*=.47) is not statistically significant (more than .05), so addition of a new variable significantly not improved the fit over model 1. therefore, we should not reject model 1.
+
+Section 4 – Discussion/Conclusion
+## Discussion
+
+In this study, we wanted to determine which factors could be considered as the best predictors for determining the last call duration that can lead customers to subscribed term deposits . This was conducted by using Multiple Linear Regression where we firstly tried to establish evidence that the various predictors chosen can be used for modelling. We investigated whether a client's age, their education,and customer subscribed term deposit. We found that there were statistically significant differences in last call duration with customers with different client age, education. Furthermore, different models were built to determine which variables are the best for prediction.
+
+The results of the baseline first model are analysed that determine whether last duration call can lead customers with different age to subscribed to the term deposit can be used as predictor for output variable. Since the p-value for the model obtained is statistically significant (1.612e-13 <.05), it was shown the model is good to fit as it performs better than the average score method for prediction. As per the analysis of R-squared value which is found to be .1341, we can say that 13.41% of the variance in the Last Call duration is explained by the considered predictors. On checking the significance levels for each of the main terms (in this case the coefficients associated with the constant,y2), we found that there is evidence that each of these terms are adding something to the model (they are statistically significant as p<.05). There were found no outliers, residuals, leverage points and influential values for the model. This model explained the% of variance in the Last call duration.
+
+The results of the second model are analysed which determine whether last call duration can lead clients with different age and education to subscribed term deposit can be used as predictor for output variable. Since the p-value for the model obtained is statistically significant (1.4e-11<.05), it gives us evidence to suggest that the model is good to fit as it performs better than the average score method for prediction. As per the analysis of R-squared value which is found to be .1428, we can say that 14.28% of the variance in Last call duration is explained by the considered predictors. On checking the significance levels for each of the main terms (in this case the coefficients associated with the constant, y2), we found that there is evidence that each of these terms are adding something to the model (they are statistically significant as p<.05). There were no outliers, residuals, leverage points and influential values found for the model. Overall, the second model can not be considered better than the baseline model as it is statistically significant based on comparison results and addresses a few higher amounts of variance in the output variable, Last call duration which implies it is not better at making predictions.
+
+From this analysis, there is evidence to conclude that Model 2 is the better compared to the model because of 14.28%% of the variance in Last call duration but this is not very much different between model 1 to model 2, so if we want to decide we should say the model 1 is better because this differences is not a lot.
+
+
+## References
+
+George, D. (2011).
+Ziegel, E., & Lohr, S. (2000). Sampling: Design and Analysis. Technometrics, 42(2), 223. doi: 10.2307/1271491
+Field, A., Miles, J., & Field, Z. (2012).
+Moro, S., Cortez, P., & Rita, P. (2014). A data-driven approach to predict the success of bank telemarketing. Decision Support Systems, 62, 22-31. doi: 10.1016/j.dss.2014.03.001
+UCI Machine Learning Repository: Bank Marketing Data Set. (2021). Retrieved 6 January 2021, from https://archive.ics.uci.edu/ml/datasets/Bank+Marketing
+CrossTable function | R Documentation. (2021). Retrieved 4 January 2021, from https://www.rdocumentation.org/packages/gmodels/versions/2.18.1/topics/CrossTable
+
+
